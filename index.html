@@ -357,14 +357,17 @@ function chaveFirebase(key, shared){
   return shared ? `shared/${key}` : `private/${idDoAparelho()}/${key}`;
 }
 
+let ultimoErroFirebase = null;
+
 const db = {
   async get(key, shared){
     if(firebaseDB){
       try{
         const snap = await firebaseDB.ref(chaveFirebase(key, shared)).once('value');
+        ultimoErroFirebase = null;
         const val = snap.val();
         return val === null || val === undefined ? null : { key, value: val, shared };
-      }catch(e){ console.warn('Firebase get falhou, usando modo local:', e); }
+      }catch(e){ ultimoErroFirebase = (e && e.message) || String(e); console.warn('Firebase get falhou, usando modo local:', e); }
     }
     if(temStorageNativo()){
       try{ return await window.storage.get(key, shared); }catch(e){ /* cai pro fallback */ }
@@ -378,8 +381,9 @@ const db = {
     if(firebaseDB){
       try{
         await firebaseDB.ref(chaveFirebase(key, shared)).set(value);
+        ultimoErroFirebase = null;
         return { key, value, shared };
-      }catch(e){ console.warn('Firebase set falhou, usando modo local:', e); }
+      }catch(e){ ultimoErroFirebase = (e && e.message) || String(e); console.warn('Firebase set falhou, usando modo local:', e); }
     }
     if(temStorageNativo()){
       try{ return await window.storage.set(key, value, shared); }catch(e){ /* cai pro fallback */ }
@@ -1087,6 +1091,7 @@ function renderConfigTab(){
         ${firebaseDB ? `
           <div class="acesso-row" style="border:none;"><span style="color:var(--green); font-weight:700;">🟢 Conectado ao banco online (Firebase)</span><span style="color:var(--ink-soft); font-size:12.5px;">Todos os computadores veem os mesmos dados</span></div>
           <div class="acesso-row" style="border:none;"><span style="color:${firebase.auth && firebase.auth().currentUser ? 'var(--green)' : 'var(--red)'}; font-weight:700;">${firebase.auth && firebase.auth().currentUser ? '🔒 Login protegido ativo' : '⚠️ Login protegido não confirmado'}</span><span style="color:var(--ink-soft); font-size:12.5px;">${firebase.auth && firebase.auth().currentUser ? 'Acesso anônimo autenticado' : 'Ative o login anônimo no console do Firebase'}</span></div>
+          ${ultimoErroFirebase ? `<div class="acesso-row" style="border:none;"><span style="color:var(--red); font-weight:700;">🔴 Último erro do banco</span><span style="color:var(--red); font-size:12.5px; max-width:320px; text-align:right;">${esc(ultimoErroFirebase)}</span></div>` : ''}
         ` : `
           <div class="acesso-row" style="border:none;"><span style="color:var(--amber); font-weight:700;">🟡 Rodando em modo local</span><span style="color:var(--ink-soft); font-size:12.5px;">Dados salvos só neste aparelho</span></div>
         `}
