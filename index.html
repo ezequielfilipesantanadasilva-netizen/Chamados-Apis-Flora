@@ -151,7 +151,7 @@
   .error-msg{color:var(--red); font-size:13px; font-weight:600; margin-top:8px;}
 
   /* estoque dashboard */
-  .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:26px;}
+  .kpis{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; margin-bottom:26px;}
   @media(max-width:700px){.kpis{grid-template-columns:1fr 1fr;}}
   .kpi{background:var(--panel); border:1.5px solid var(--line); border-radius:16px; padding:18px;}
   .kpi .num{font-family:'Plus Jakarta Sans',sans-serif; font-weight:800; font-size:28px;}
@@ -179,6 +179,7 @@
   .badge-novo{background:#DDEBFF; color:#1D5FBF;}
   .badge-analise{background:#FFF3C4; color:#8A6A00;}
   .badge-separando{background:#FFE3CC; color:#B25A00;}
+  .badge-semestoque{background:#F3E2E2; color:#A31E1E;}
   .badge-entregue{background:#DDF3E2; color:var(--green);}
   .badge-retirado{background:#EDE4FB; color:#6B3FC4;}
   .badge-cancelado{background:#F3E2E2; color:var(--red);}
@@ -275,7 +276,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 
 <header>
   <button class="backbtn" id="backBtn" style="display:none;">← Voltar ao início</button>
@@ -295,6 +295,7 @@ let state = {
   produtos: {},
   senhaEstoque: null,
   senhaConfig: null,
+  senhaExcluir: null,
   configUnlocked: false,
   acessos: [],
   filtro: { status:'todos', prioridade:'todas', busca:'' },
@@ -302,10 +303,11 @@ let state = {
   loading: true
 };
 
-const STATUS_LIST = ['Novo','Em análise','Separando','Entregue','Retirado do sistema','Cancelado'];
+const STATUS_LIST = ['Novo','Em análise','Separando','Sem Estoque','Entregue','Retirado do sistema','Cancelado'];
 const PRIORIDADES = ['Baixa','Média','Alta','Urgente'];
 const SENHA_PADRAO_LOGISTICA = 'logistica@2026';
 const SENHA_PADRAO_CONFIG = '8002Mfe@';
+const SENHA_PADRAO_EXCLUIR = '8002Mfe@';
 
 /* =====================================================================
    BANCO DE DADOS ONLINE (Firebase Realtime Database)
@@ -450,6 +452,14 @@ async function loadData(){
     await db.set('senha-config', JSON.stringify(state.senhaConfig), true);
   }
   try{
+    const se = await db.get('senha-excluir', true);
+    state.senhaExcluir = se ? JSON.parse(se.value) : null;
+  }catch(e){ state.senhaExcluir = null; }
+  if(!state.senhaExcluir){
+    state.senhaExcluir = SENHA_PADRAO_EXCLUIR;
+    await db.set('senha-excluir', JSON.stringify(state.senhaExcluir), true);
+  }
+  try{
     const a = await db.get('acessos-estoque', true);
     state.acessos = a ? JSON.parse(a.value) : [];
   }catch(e){ state.acessos = []; }
@@ -483,6 +493,10 @@ async function salvarNovaSenhaConfig(nova){
   state.senhaConfig = nova;
   await db.set('senha-config', JSON.stringify(state.senhaConfig), true);
 }
+async function salvarNovaSenhaExcluir(nova){
+  state.senhaExcluir = nova;
+  await db.set('senha-excluir', JSON.stringify(state.senhaExcluir), true);
+}
 async function registrarAcesso(){
   state.acessos.unshift({ em: new Date().toISOString() });
   state.acessos = state.acessos.slice(0, 30);
@@ -499,9 +513,52 @@ function fmtData(iso){
   const [y,m,d] = iso.split('-');
   return `${d}/${m}/${y}`;
 }
+function fmtDataHora(isoCompleto){
+  if(!isoCompleto) return '—';
+  const dt = new Date(isoCompleto);
+  if(isNaN(dt.getTime())) return '—';
+  const d = String(dt.getDate()).padStart(2,'0');
+  const m = String(dt.getMonth()+1).padStart(2,'0');
+  const y = dt.getFullYear();
+  const hh = String(dt.getHours()).padStart(2,'0');
+  const mm = String(dt.getMinutes()).padStart(2,'0');
+  return `${d}/${m}/${y} ${hh}:${mm}`;
+}
+function comprimirImagem(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler o arquivo'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Falha ao carregar a imagem'));
+      img.onload = () => {
+        const MAX = 900;
+        let { width, height } = img;
+        if(width > height && width > MAX){ height = Math.round(height * MAX / width); width = MAX; }
+        else if(height > MAX){ width = Math.round(width * MAX / height); height = MAX; }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.72));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function abrirFotoEntrega(c){
+  const win = window.open('', '_blank');
+  if(!win){ toast('Permita pop-ups para ver a foto.'); return; }
+  win.document.write(`
+    <title>Foto da entrega — ${c.id}</title>
+    <body style="margin:0; background:#111; display:flex; align-items:center; justify-content:center; min-height:100vh;">
+      <img src="${c.fotoEntrega}" style="max-width:100%; max-height:100vh; display:block;">
+    </body>
+  `);
+}
 function badgeClass(status){
   return {
-    'Novo':'badge-novo','Em análise':'badge-analise','Separando':'badge-separando',
+    'Novo':'badge-novo','Em análise':'badge-analise','Separando':'badge-separando','Sem Estoque':'badge-semestoque',
     'Entregue':'badge-entregue','Retirado do sistema':'badge-retirado','Cancelado':'badge-cancelado'
   }[status] || 'badge-novo';
 }
@@ -607,7 +664,7 @@ function renderSolicitante(app){
         </div>
         <div class="field">
           <label>Precisa ser entregue até</label>
-          <input type="date" id="fData" value="${esc(state._data||'')}">
+          <input type="text" id="fData" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" value="${esc(state._dataBR||'')}">
         </div>
       </div>
 
@@ -624,12 +681,27 @@ function renderSolicitante(app){
   document.getElementById('fNome').oninput = e => state._nome = e.target.value;
   document.getElementById('fSetor').oninput = e => state._setor = e.target.value;
   document.getElementById('fPrio').onchange = e => state._prio = e.target.value;
-  document.getElementById('fData').onchange = e => state._data = e.target.value;
+  document.getElementById('fData').oninput = e => { mascaraDataBR(e.target); state._dataBR = e.target.value; };
   document.getElementById('addItemBtn').onclick = () => {
     state.formItems.push({ codigo:'', quantidade:'' });
     renderItemRows();
   };
   document.getElementById('enviarBtn').onclick = submitChamado;
+}
+
+function mascaraDataBR(el){
+  let v = el.value.replace(/\D/g,'').slice(0,8);
+  if(v.length >= 5) v = v.slice(0,2) + '/' + v.slice(2,4) + '/' + v.slice(4);
+  else if(v.length >= 3) v = v.slice(0,2) + '/' + v.slice(2);
+  el.value = v;
+}
+function dataBRparaISO(str){
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((str||'').trim());
+  if(!m) return null;
+  const [, d, mo, y] = m;
+  const dt = new Date(`${y}-${mo}-${d}T00:00:00`);
+  if(isNaN(dt.getTime()) || dt.getDate() !== parseInt(d,10) || (dt.getMonth()+1) !== parseInt(mo,10)) return null;
+  return `${y}-${mo}-${d}`;
 }
 
 function renderItemRows(){
@@ -681,9 +753,11 @@ async function submitChamado(){
   const nome = (document.getElementById('fNome').value || '').trim();
   const setor = (document.getElementById('fSetor').value || '').trim().toUpperCase();
   const prio = document.getElementById('fPrio').value;
-  const data = document.getElementById('fData').value;
+  const dataBR = document.getElementById('fData').value;
+  const data = dataBRparaISO(dataBR);
 
-  if(!nome || !setor || !data){ toast('Preencha nome, setor e data.'); return; }
+  if(!nome || !setor || !dataBR){ toast('Preencha nome, setor e data.'); return; }
+  if(!data){ toast('Data inválida. Use o formato dd/mm/aaaa.'); return; }
   const itensValidos = state.formItems
     .map(it => ({ codigo: it.codigo.trim().toUpperCase(), quantidade: it.quantidade }))
     .filter(it => it.codigo && it.quantidade);
@@ -773,16 +847,22 @@ function renderEstoqueLogin(app){
 /* ---------------- ESTOQUE DASHBOARD ---------------- */
 function renderEstoque(app){
   const total = state.chamados.length;
-  const novos = state.chamados.filter(c=>c.status==='Novo').length;
-  const andamento = state.chamados.filter(c=>['Em análise','Separando'].includes(c.status)).length;
-  const entregues = state.chamados.filter(c=>c.status==='Entregue' || c.status==='Retirado do sistema').length;
+  const iconesStatus = {
+    'Novo':{ic:'🆕',bg:'#DDEBFF',fg:'#1D5FBF'},
+    'Em análise':{ic:'🔎',bg:'#FFF3C4',fg:'#8A6A00'},
+    'Separando':{ic:'📦',bg:'#FFE3CC',fg:'#B25A00'},
+    'Sem Estoque':{ic:'🚫',bg:'#F3E2E2',fg:'#A31E1E'},
+    'Entregue':{ic:'✅',bg:'var(--p-100)',fg:'var(--p-700)'},
+    'Retirado do sistema':{ic:'📤',bg:'#EDE4FB',fg:'#6B3FC4'},
+    'Cancelado':{ic:'❌',bg:'#F3E2E2',fg:'var(--red)'}
+  };
 
   app.innerHTML = `
     <div class="dash-shell">
       <aside class="dash-sidebar">
         <div class="dash-sidebar-title">Logística</div>
         <button class="dash-nav-btn ${state.estoqueTab==='painel'?'active':''}" id="tabPainel">📋 &nbsp;Chamados</button>
-        <button class="dash-nav-btn ${state.estoqueTab==='produtos'?'active':''}" id="tabProdutos">📦 &nbsp;Base de produtos</button>
+        <button class="dash-nav-btn ${state.estoqueTab==='avaliacao'?'active':''}" id="tabAvaliacao">⭐ &nbsp;Avaliação</button>
         <button class="dash-nav-btn ${state.estoqueTab==='dados'?'active':''}" id="tabDados">📊 &nbsp;Dados</button>
         <button class="dash-nav-btn ${state.estoqueTab==='config'?'active':''}" id="tabConfig">⚙️ &nbsp;Configurações</button>
       </aside>
@@ -790,21 +870,23 @@ function renderEstoque(app){
         ${state.estoqueTab==='painel' ? `
         <div class="kpis">
           <div class="kpi"><div class="kpi-icon" style="background:var(--p-100); color:var(--p-700);">🗂️</div><div class="num">${total}</div><div class="lbl">Total de chamados</div></div>
-          <div class="kpi"><div class="kpi-icon" style="background:#DDEBFF; color:#1D5FBF;">🆕</div><div class="num" style="color:#1D5FBF;">${novos}</div><div class="lbl">Novos</div></div>
-          <div class="kpi"><div class="kpi-icon" style="background:#FFF3C4; color:var(--amber);">⏳</div><div class="num" style="color:var(--amber);">${andamento}</div><div class="lbl">Em andamento</div></div>
-          <div class="kpi"><div class="kpi-icon" style="background:var(--p-100); color:var(--p-700);">✅</div><div class="num" style="color:var(--green);">${entregues}</div><div class="lbl">Entregues</div></div>
+          ${STATUS_LIST.map(s => {
+            const qtd = state.chamados.filter(c=>c.status===s).length;
+            const ic = iconesStatus[s] || {ic:'•',bg:'var(--p-100)',fg:'var(--p-700)'};
+            return `<div class="kpi"><div class="kpi-icon" style="background:${ic.bg}; color:${ic.fg};">${ic.ic}</div><div class="num" style="color:${ic.fg};">${qtd}</div><div class="lbl">${esc(s)}</div></div>`;
+          }).join('')}
         </div>` : ''}
         <div id="tabContent"></div>
       </div>
     </div>
   `;
   document.getElementById('tabPainel').onclick = () => { state.estoqueTab='painel'; render(); };
-  document.getElementById('tabProdutos').onclick = () => { state.estoqueTab='produtos'; render(); };
+  document.getElementById('tabAvaliacao').onclick = () => { state.estoqueTab='avaliacao'; render(); };
   document.getElementById('tabDados').onclick = () => { state.estoqueTab='dados'; render(); };
   document.getElementById('tabConfig').onclick = () => { state.estoqueTab='config'; state._cfgErr=false; render(); };
 
   if(state.estoqueTab === 'painel') renderPainelChamados();
-  else if(state.estoqueTab === 'produtos') renderProdutosTab();
+  else if(state.estoqueTab === 'avaliacao') renderAvaliacaoTab();
   else if(state.estoqueTab === 'dados') renderDadosTab();
   else renderConfigTab();
 }
@@ -854,12 +936,12 @@ function renderTable(){
   tw.innerHTML = `
     <table>
       <thead><tr>
-        <th>Chamado</th><th>Solicitante / Setor</th><th>Itens</th><th>Prioridade</th><th>Entrega</th><th>Status</th><th></th>
+        <th>Chamado</th><th>Solicitante / Setor</th><th>Itens</th><th>Prioridade</th><th>Entrega</th><th>Status</th><th>Foto</th><th></th>
       </tr></thead>
       <tbody>
         ${list.map(c => `
           <tr>
-            <td><span class="code-chip">${c.id}</span><div style="font-size:11.5px; color:var(--ink-soft); margin-top:5px;">${fmtData(c.criadoEm.slice(0,10))}</div></td>
+            <td><span class="code-chip">${c.id}</span><div style="font-size:11.5px; color:var(--ink-soft); margin-top:5px;">${fmtDataHora(c.criadoEm)}</div></td>
             <td><strong>${esc(c.nome)}</strong><div style="color:var(--ink-soft); font-size:12.5px;">${esc(c.setor)}</div></td>
             <td class="items-mini">${c.itens.map(it=>`<div>${it.quantidade}${it.unidade?' '+it.unidade:''} — ${esc(it.material)} <span style="color:var(--gray);">(${it.codigo})</span></div>`).join('')}</td>
             <td class="${prioClass(c.prioridade)}">${c.prioridade}</td>
@@ -868,26 +950,68 @@ function renderTable(){
               <select class="status-select" data-id="${c.id}">
                 ${STATUS_LIST.map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}
               </select>
+              ${c.entregueEm ? `<div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">entregue ${fmtDataHora(c.entregueEm)}</div>` : ''}
               <br><button class="del-link" data-id="${c.id}">Excluir</button>
             </td>
+            <td>${c.fotoEntrega ? `<button class="del-link" style="color:var(--green);" data-foto="${c.id}">📷 Ver foto</button>` : '—'}</td>
           </tr>
         `).join('')}
       </tbody>
     </table>
+    <input type="file" id="fotoEntregaInput" accept="image/*" style="display:none;">
   `;
+  let pendingEntregaId = null;
+  const fotoInput = document.getElementById('fotoEntregaInput');
   tw.querySelectorAll('.status-select').forEach(sel=>{
     sel.onchange = async e => {
       const c = state.chamados.find(x=>x.id === e.target.dataset.id);
-      c.status = e.target.value;
+      const novoStatus = e.target.value;
+      if(novoStatus === 'Entregue'){
+        e.target.value = c.status; // só confirma visualmente depois da foto
+        pendingEntregaId = c.id;
+        fotoInput.click();
+        return;
+      }
+      c.status = novoStatus;
       c.historico.push({ status: c.status, em: new Date().toISOString() });
       await saveChamados();
       toast(`Chamado ${c.id} → ${c.status}`);
       renderEstoque(document.getElementById('app'));
     };
   });
-  tw.querySelectorAll('.del-link').forEach(btn=>{
+  fotoInput.onchange = async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if(!file || !pendingEntregaId) return;
+    const c = state.chamados.find(x=>x.id === pendingEntregaId);
+    pendingEntregaId = null;
+    if(!c) return;
+    toast('Enviando foto…');
+    try{
+      const dataUrl = await comprimirImagem(file);
+      c.status = 'Entregue';
+      c.fotoEntrega = dataUrl;
+      c.entregueEm = new Date().toISOString();
+      c.historico.push({ status:'Entregue', em: c.entregueEm });
+      await saveChamados();
+      toast(`Chamado ${c.id} → Entregue`);
+      renderEstoque(document.getElementById('app'));
+    }catch(err){
+      toast('Não consegui processar a foto. Tente novamente.');
+    }
+  };
+  tw.querySelectorAll('[data-foto]').forEach(btn=>{
+    btn.onclick = e => {
+      const c = state.chamados.find(x=>x.id === e.target.dataset.foto);
+      if(c && c.fotoEntrega) abrirFotoEntrega(c);
+    };
+  });
+  tw.querySelectorAll('.del-link[data-id]').forEach(btn=>{
     btn.onclick = async e => {
       const id = e.target.dataset.id;
+      const senha = prompt(`Digite a senha para excluir o chamado ${id}:`);
+      if(senha === null) return;
+      if(senha !== state.senhaExcluir){ toast('Senha incorreta. Chamado não excluído.'); return; }
       if(!confirm(`Excluir o chamado ${id}? Essa ação não pode ser desfeita.`)) return;
       state.chamados = state.chamados.filter(x => x.id !== id);
       await saveChamados();
@@ -897,13 +1021,14 @@ function renderTable(){
   });
 }
 
-function renderProdutosTab(){
-  const wrap = document.getElementById('tabContent');
+function renderProdutosTab(containerId){
+  containerId = containerId || 'tabContent';
+  const wrap = document.getElementById(containerId);
   const codigos = Object.keys(state.produtos).sort();
   wrap.innerHTML = `
-    <div class="panel">
-      <h2 class="section-title" style="font-size:17px;">Base de produtos</h2>
-      <p class="section-sub">Cadastre os códigos que os solicitantes vão usar, ou importe de uma planilha. O nome do material aparece automaticamente no formulário.</p>
+    <div class="cfg-section">
+      <h3>Base de produtos</h3>
+      <p class="hint">Cadastre os códigos que os solicitantes vão usar, ou importe de uma planilha. O nome do material aparece automaticamente no formulário.</p>
       <div class="row3">
         <div class="field" style="margin:0;"><label>Código</label><input id="npCodigo" placeholder="Ex: MP-004"></div>
         <div class="field" style="margin:0;"><label>Nome do material</label><input id="npNome" placeholder="Ex: Álcool de cereais 96%"></div>
@@ -935,13 +1060,13 @@ function renderProdutosTab(){
     state.produtos[codigo] = { nome, unidade };
     await saveProdutos();
     toast(`Produto ${codigo} salvo.`);
-    renderProdutosTab();
+    renderProdutosTab(containerId);
   };
   wrap.querySelectorAll('.del').forEach(btn=>{
     btn.onclick = async e => {
       delete state.produtos[e.target.dataset.c];
       await saveProdutos();
-      renderProdutosTab();
+      renderProdutosTab(containerId);
     };
   });
   const importFile = document.getElementById('importFile');
@@ -949,7 +1074,7 @@ function renderProdutosTab(){
   importFile.onchange = async e => {
     const file = e.target.files[0];
     e.target.value = '';
-    if(file) await handleImportPlanilha(file);
+    if(file) await handleImportPlanilha(file, containerId);
   };
 }
 
@@ -957,7 +1082,7 @@ function normalizeHeader(h){
   return String(h||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
 }
 
-async function handleImportPlanilha(file){
+async function handleImportPlanilha(file, containerId){
   if(typeof XLSX === 'undefined'){ toast('Não consegui carregar o leitor de planilhas.'); return; }
   try{
     const buf = await file.arrayBuffer();
@@ -988,10 +1113,55 @@ async function handleImportPlanilha(file){
     }
     await saveProdutos();
     toast(`${count} produto${count===1?'':'s'} importado${count===1?'':'s'}.`);
-    renderProdutosTab();
+    renderProdutosTab(containerId);
   }catch(err){
     toast('Não consegui ler essa planilha. Confira o arquivo.');
   }
+}
+
+/* ---------------- AVALIAÇÃO ---------------- */
+function renderAvaliacaoTab(){
+  const wrap = document.getElementById('tabContent');
+  const avaliados = state.chamados.filter(c => c.status === 'Entregue' && c.entregueEm);
+  const noPrazo = avaliados.filter(c => new Date(c.entregueEm) <= new Date(c.dataNecessaria + 'T23:59:59'));
+  const foraPrazo = avaliados.filter(c => new Date(c.entregueEm) > new Date(c.dataNecessaria + 'T23:59:59'));
+  const pct = avaliados.length ? Math.round(noPrazo.length / avaliados.length * 100) : 0;
+
+  wrap.innerHTML = `
+    <div class="stat-cards">
+      <div class="stat-card"><div class="num">${avaliados.length}</div><div class="lbl">Chamados avaliados</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--green);">${noPrazo.length}</div><div class="lbl">Entregues no prazo</div></div>
+      <div class="stat-card"><div class="num" style="color:var(--red);">${foraPrazo.length}</div><div class="lbl">Entregues fora do prazo</div></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px;">
+      <h2 class="section-title" style="font-size:16px;">Taxa de entrega no prazo</h2>
+      <div class="rank-row" style="grid-template-columns:1fr 60px;">
+        <span class="rank-bar-wrap" style="height:14px;"><span class="rank-bar" style="width:${pct}%;"></span></span>
+        <span class="rval">${pct}%</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2 class="section-title" style="font-size:16px;">Detalhes por chamado</h2>
+      <p class="section-sub">Compara a data pedida com a data em que o chamado foi marcado como entregue.</p>
+      ${avaliados.length===0 ? '<div class="empty-state">Nenhum chamado avaliado ainda — a avaliação aparece aqui assim que um chamado for marcado como Entregue.</div>' : `
+      <table>
+        <thead><tr><th>Chamado</th><th>Setor</th><th>Pedido para</th><th>Entregue em</th><th>Resultado</th></tr></thead>
+        <tbody>
+          ${avaliados.slice().sort((a,b)=> new Date(b.entregueEm) - new Date(a.entregueEm)).map(c => {
+            const atrasado = new Date(c.entregueEm) > new Date(c.dataNecessaria + 'T23:59:59');
+            return `<tr>
+              <td><span class="code-chip">${c.id}</span></td>
+              <td>${esc(c.setor)}</td>
+              <td>${fmtData(c.dataNecessaria)}</td>
+              <td>${fmtDataHora(c.entregueEm)}</td>
+              <td><span class="badge ${atrasado?'badge-cancelado':'badge-entregue'}">${atrasado?'Fora do prazo':'No prazo'}</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      `}
+    </div>
+  `;
 }
 
 /* ---------------- DADOS ---------------- */
@@ -1090,7 +1260,6 @@ function renderConfigTab(){
         <p class="hint">Status da conexão com o banco de dados compartilhado.</p>
         ${firebaseDB ? `
           <div class="acesso-row" style="border:none;"><span style="color:var(--green); font-weight:700;">🟢 Conectado ao banco online (Firebase)</span><span style="color:var(--ink-soft); font-size:12.5px;">Todos os computadores veem os mesmos dados</span></div>
-          <div class="acesso-row" style="border:none;"><span style="color:${firebase.auth && firebase.auth().currentUser ? 'var(--green)' : 'var(--red)'}; font-weight:700;">${firebase.auth && firebase.auth().currentUser ? '🔒 Login protegido ativo' : '⚠️ Login protegido não confirmado'}</span><span style="color:var(--ink-soft); font-size:12.5px;">${firebase.auth && firebase.auth().currentUser ? 'Acesso anônimo autenticado' : 'Ative o login anônimo no console do Firebase'}</span></div>
           ${ultimoErroFirebase ? `<div class="acesso-row" style="border:none;"><span style="color:var(--red); font-weight:700;">🔴 Último erro do banco</span><span style="color:var(--red); font-size:12.5px; max-width:320px; text-align:right;">${esc(ultimoErroFirebase)}</span></div>` : ''}
         ` : `
           <div class="acesso-row" style="border:none;"><span style="color:var(--amber); font-weight:700;">🟡 Rodando em modo local</span><span style="color:var(--ink-soft); font-size:12.5px;">Dados salvos só neste aparelho</span></div>
@@ -1112,6 +1281,15 @@ function renderConfigTab(){
         </div>
         <button class="btn btn-primary" id="salvarSenhaCfgBtn" style="margin-top:14px;">Salvar nova senha</button>
       </div>
+      <div class="cfg-section">
+        <h3>Senha para excluir chamados</h3>
+        <p class="hint">Pedida sempre que alguém tentar excluir um chamado no painel.</p>
+        <div class="row2">
+          <div class="field" style="margin:0;"><label>Nova senha</label><input type="text" id="novaSenhaExcluir" placeholder="Digite a nova senha"></div>
+        </div>
+        <button class="btn btn-primary" id="salvarSenhaExcluirBtn" style="margin-top:14px;">Salvar nova senha</button>
+      </div>
+      <div id="produtosSection"></div>
       <div class="cfg-section">
         <h3>Últimos acessos</h3>
 
@@ -1136,25 +1314,18 @@ function renderConfigTab(){
     toast('Senha das Configurações atualizada.');
     document.getElementById('novaSenhaCfg').value = '';
   };
+  document.getElementById('salvarSenhaExcluirBtn').onclick = async () => {
+    const nova = document.getElementById('novaSenhaExcluir').value.trim();
+    if(nova.length < 4){ toast('A senha precisa ter pelo menos 4 caracteres.'); return; }
+    await salvarNovaSenhaExcluir(nova);
+    toast('Senha de exclusão atualizada.');
+    document.getElementById('novaSenhaExcluir').value = '';
+  };
+  renderProdutosTab('produtosSection');
 }
 
 /* ---------------- init ---------------- */
-async function garantirLoginFirebase(){
-  if(!firebaseDB || typeof firebase === 'undefined' || !firebase.auth) return;
-  try{
-    await firebase.auth().signInAnonymously();
-    // espera o estado de autenticação confirmar antes de liberar leituras/escritas
-    await new Promise(resolve => {
-      const unsub = firebase.auth().onAuthStateChanged(user => {
-        if(user){ unsub(); resolve(); }
-      });
-    });
-  }catch(e){
-    console.warn('Login anônimo do Firebase falhou (banco pode negar acesso até isso ser habilitado no console):', e);
-  }
-}
 (async function init(){
-  await garantirLoginFirebase();
   await loadData();
   render();
 })();
