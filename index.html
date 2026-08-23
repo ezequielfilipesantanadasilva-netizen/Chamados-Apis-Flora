@@ -180,7 +180,7 @@
   table{width:100%; border-collapse:collapse; font-size:13.5px;}
   th{text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-soft); padding:10px 12px; border-bottom:2px solid var(--line);}
   td{padding:12px; border-bottom:1px solid var(--line); vertical-align:top;}
-  tr:hover td{background:var(--green-soft);}
+  tr:hover td{background:rgba(35,83,71,.06);}
   .code-chip{font-family:monospace; font-weight:700; font-size:12.5px; background:#F2EEDF; padding:3px 7px; border-radius:6px; white-space:nowrap; display:inline-block;}
   .mini-open-btn{background:none; border:1.5px solid var(--line); color:var(--green); font-weight:700; font-size:11px; padding:3px 7px; border-radius:6px; cursor:pointer; white-space:nowrap;}
   .mini-open-btn:hover{border-color:var(--green); background:var(--p-100);}
@@ -367,6 +367,7 @@
 <div class="comb-bg"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 
 <header>
@@ -426,10 +427,20 @@ const FIREBASE_CONFIG = {
 
 const firebaseConfigurado = FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('COLE_AQUI');
 let firebaseDB = null;
+let firebaseAuthPronto = Promise.resolve(null);
 if(firebaseConfigurado && typeof firebase !== 'undefined'){
   try{
     firebase.initializeApp(FIREBASE_CONFIG);
     firebaseDB = firebase.database();
+    /* Login anônimo: não pede nada da pessoa, mas cria uma credencial que as
+       regras de segurança do Firebase podem exigir (auth != null). Sem isso,
+       qualquer um que pegue a URL do banco no código-fonte conseguiria ler e
+       escrever direto, por fora do site. */
+    firebaseAuthPronto = firebase.auth().signInAnonymously().catch(e => {
+      ultimoErroFirebase = 'Login anônimo do Firebase falhou: ' + ((e && e.message) || String(e));
+      console.warn('signInAnonymously falhou:', e);
+      return null;
+    });
   }catch(e){ console.warn('Firebase não iniciou:', e); firebaseDB = null; }
 }
 
@@ -1955,6 +1966,7 @@ function renderConfigTab(){
 
 /* ---------------- init ---------------- */
 (async function init(){
+  await firebaseAuthPronto; // espera o login anônimo (se houver Firebase) antes de tocar no banco
   await loadData();
   render();
   iniciarListenerChamados();
