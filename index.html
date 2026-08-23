@@ -174,7 +174,13 @@
   th{text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-soft); padding:10px 12px; border-bottom:2px solid var(--line);}
   td{padding:12px; border-bottom:1px solid var(--line); vertical-align:top;}
   tr:hover td{background:var(--green-soft);}
-  .code-chip{font-family:monospace; font-weight:700; font-size:12.5px; background:#F2EEDF; padding:3px 7px; border-radius:6px;}
+  .code-chip{font-family:monospace; font-weight:700; font-size:12.5px; background:#F2EEDF; padding:3px 7px; border-radius:6px; white-space:nowrap; display:inline-block;}
+  .mini-open-btn{background:none; border:1.5px solid var(--line); color:var(--green); font-weight:700; font-size:11px; padding:3px 7px; border-radius:6px; cursor:pointer; white-space:nowrap;}
+  .mini-open-btn:hover{border-color:var(--green); background:var(--p-100);}
+  .acoes-x{background:#FBE9E7; color:var(--red); border:none; border-radius:50%; width:22px; height:22px; font-size:12px; font-weight:800; cursor:pointer; line-height:1; vertical-align:middle;}
+  .acoes-pop{margin-top:8px; padding:8px; border:1.5px solid var(--line); border-radius:10px; background:#fff; display:flex; flex-direction:column; gap:6px; align-items:flex-start;}
+  .acoes-pop button{background:none; border:none; color:var(--red); font-weight:700; font-size:12px; cursor:pointer; padding:0;}
+  .acoes-pop button[data-trocar]{color:var(--ink-soft);}
   .badge{display:inline-block; font-size:11.5px; font-weight:700; padding:4px 9px; border-radius:20px;}
   .badge-novo{background:#DDEBFF; color:#1D5FBF;}
   .badge-analise{background:#FFF3C4; color:#8A6A00;}
@@ -201,15 +207,22 @@
   @media(max-width:640px){.prod-row{grid-template-columns:1fr; gap:4px;}}
   .prod-row .del{background:none; border:none; color:var(--red); font-weight:700; cursor:pointer; font-size:13px; justify-self:end;}
 
-  .mine-list{margin-top:34px; max-width:640px; margin-left:auto; margin-right:auto;}
+  .req-layout{display:flex; gap:32px; align-items:flex-start; max-width:1000px; margin:0 auto;}
+  .mine-list{width:300px; flex:none; margin-top:8px;}
+  .mine-list .section-title{text-align:left;}
   .mine-card{
     border:1.5px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:10px;
-    display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
+    display:flex; flex-direction:column; align-items:flex-start; gap:8px;
     background:#fff;
+  }
+  @media(max-width:900px){
+    .req-layout{flex-direction:column;}
+    .req-scene{order:-1;}
+    .mine-list{width:100%;}
   }
 
   /* ---------- CENA DO SOLICITANTE (estilo cartão com acentos) ---------- */
-  .req-scene{position:relative; max-width:600px; margin:0 auto; padding:6px 0 0;}
+  .req-scene{position:relative; flex:1; min-width:0; max-width:600px; margin:0; padding:6px 0 0;}
   .req-card{border-radius:28px; padding:34px 32px; position:relative; z-index:2; box-shadow:0 24px 50px -12px rgba(11,43,38,.16);}
   .req-card .section-title, .req-card .section-sub{text-align:center;}
   .req-card .section-title{font-size:22px;}
@@ -269,6 +282,12 @@
   .cfg-section .hint{font-size:13px; color:var(--ink-soft); margin:0 0 14px;}
   .acesso-row{display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line); font-size:13.5px;}
   .acesso-row:last-child{border-bottom:none;}
+  #printArea{position:fixed; left:-9999px; top:0; width:800px;}
+  @media print{
+    body *{ visibility:hidden; }
+    #printArea, #printArea *{ visibility:visible; }
+    #printArea{ position:absolute; left:0; top:0; width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -283,6 +302,7 @@
 </header>
 
 <main id="app"></main>
+<div id="printArea"></div>
 
 <script>
 /* ---------------- estado ---------------- */
@@ -565,6 +585,22 @@ function badgeClass(status){
 function prioClass(p){
   return {'Baixa':'prio-baixa','Média':'prio-media','Alta':'prio-alta','Urgente':'prio-urgente'}[p] || '';
 }
+const STATUS_FINALIZADOS = ['Entregue','Retirado do sistema','Cancelado'];
+function isAtrasado(c){
+  if(STATUS_FINALIZADOS.includes(c.status)) return false;
+  if(!c.dataNecessaria) return false;
+  return new Date(c.dataNecessaria + 'T23:59:59') < new Date();
+}
+function exportarExcel(planilhas, filename){
+  if(typeof XLSX === 'undefined'){ toast('Não consegui carregar o gerador de planilhas.'); return; }
+  const wb = XLSX.utils.book_new();
+  planilhas.forEach(p => {
+    const ws = XLSX.utils.json_to_sheet(p.linhas);
+    XLSX.utils.book_append_sheet(wb, ws, p.nome.slice(0,31));
+  });
+  XLSX.writeFile(wb, filename);
+  toast('Planilha exportada.');
+}
 function toast(msg){
   const t = document.createElement('div');
   t.className = 'toast'; t.textContent = msg;
@@ -582,6 +618,7 @@ function render(){
   if(state.screen === 'solicitante') return renderSolicitante(app);
   if(state.screen === 'estoque-login') return renderEstoqueLogin(app);
   if(state.screen === 'estoque') return renderEstoque(app);
+  if(state.screen === 'estoque-detalhe') return renderDetalheChamado(app);
 }
 
 document.getElementById('backBtn').onclick = () => {
@@ -631,7 +668,9 @@ function renderLanding(app){
 function renderSolicitante(app){
   const nomeVal = state._nome || '';
   app.innerHTML = `
-    <div class="req-scene">
+    <div class="req-layout">
+      <div class="mine-list" id="mineList"></div>
+      <div class="req-scene">
       <div class="req-decor req-decor-1"></div>
       <div class="req-decor req-decor-2"></div>
       <div class="req-decor req-decor-3"></div>
@@ -670,9 +709,8 @@ function renderSolicitante(app){
 
       <button class="btn btn-primary" id="enviarBtn" style="width:100%;">Enviar chamado</button>
       </div>
+      </div>
     </div>
-
-    <div class="mine-list" id="mineList"></div>
   `;
 
   renderItemRows();
@@ -758,6 +796,8 @@ async function submitChamado(){
 
   if(!nome || !setor || !dataBR){ toast('Preencha nome, setor e data.'); return; }
   if(!data){ toast('Data inválida. Use o formato dd/mm/aaaa.'); return; }
+  const hojeISO = new Date().toISOString().slice(0,10);
+  if(data < hojeISO){ toast('A data não pode ser anterior a hoje.'); return; }
   const itensValidos = state.formItems
     .map(it => ({ codigo: it.codigo.trim().toUpperCase(), quantidade: it.quantidade }))
     .filter(it => it.codigo && it.quantidade);
@@ -796,21 +836,110 @@ function renderMineList(){
     el.innerHTML = '';
     return;
   }
-  el.innerHTML = `<h2 class="section-title" style="font-size:16px; margin-bottom:14px; text-align:center;">Seus últimos chamados</h2>` +
+  el.innerHTML = `<h2 class="section-title" style="font-size:16px; margin-bottom:14px;">Seus últimos chamados</h2>` +
     meus.slice(0,8).map(c => `
       <div class="mine-card">
-        <div>
-          <span class="code-chip">${c.id}</span>
-          <div class="items-mini" style="margin-top:6px;">
-            ${c.itens.map(it=>`<div>${it.quantidade}x ${esc(it.material)}</div>`).join('')}
-          </div>
+        <span class="code-chip">${c.id}</span>
+        <div class="items-mini">
+          ${c.itens.map(it=>`<div>${it.quantidade}x ${esc(it.material)}</div>`).join('')}
         </div>
-        <div style="text-align:right;">
-          <span class="badge ${badgeClass(c.status)}">${c.status}</span>
-          <div style="font-size:12px; color:var(--ink-soft); margin-top:6px;">até ${fmtData(c.dataNecessaria)}</div>
-        </div>
+        <span class="badge ${badgeClass(c.status)}">${c.status}</span>
+        <div style="font-size:12px; color:var(--ink-soft);">até ${fmtData(c.dataNecessaria)}</div>
       </div>
     `).join('');
+}
+
+/* ---------------- DETALHE / IMPRESSÃO DO CHAMADO ---------------- */
+function renderDetalheChamado(app){
+  const c = state.chamados.find(x => x.id === state.detalheChamadoId);
+  if(!c){
+    app.innerHTML = `<div class="panel empty-state">Chamado não encontrado.<br><button class="btn btn-ghost" id="voltarPainelBtn" style="margin-top:14px;">← Voltar aos chamados</button></div>`;
+    document.getElementById('voltarPainelBtn').onclick = () => { state.screen='estoque'; state.estoqueTab='painel'; render(); };
+    return;
+  }
+  app.innerHTML = `
+    <div class="req-scene" style="max-width:640px; margin:0 auto;">
+      <div class="req-card panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <button class="btn btn-ghost" id="voltarPainelBtn">← Voltar</button>
+          <button class="btn btn-primary" id="imprimirBtn">🖨 Imprimir chamado</button>
+        </div>
+        <h2 class="section-title">Espelho do chamado <span class="code-chip" style="font-size:16px; vertical-align:middle;">${c.id}</span></h2>
+        <p class="section-sub">Somente leitura — o que a pessoa preencheu ao abrir o chamado. Nada aqui pode ser alterado.</p>
+
+        <div class="row2">
+          <div class="field"><label>Solicitante</label><input value="${esc(c.nome)}" disabled></div>
+          <div class="field"><label>Setor / Centro de custo</label><input value="${esc(c.setor)}" disabled></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>Prioridade</label><input value="${esc(c.prioridade)}" disabled></div>
+          <div class="field"><label>Precisa ser entregue até</label><input value="${fmtData(c.dataNecessaria)}" disabled></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>Status atual</label><input value="${esc(c.status)}" disabled></div>
+          <div class="field"><label>Aberto em</label><input value="${fmtDataHora(c.criadoEm)}" disabled></div>
+        </div>
+
+        <label style="display:block; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-soft); margin-bottom:8px;">Itens pedidos</label>
+        <table style="margin-bottom:18px;">
+          <thead><tr><th>Nº</th><th>Código</th><th>Material</th><th>Quantidade</th></tr></thead>
+          <tbody>
+            ${c.itens.map((it,i) => `<tr><td>${i+1}</td><td class="code-chip">${esc(it.codigo)}</td><td>${esc(it.material)}</td><td>${it.quantidade}${it.unidade?' '+it.unidade:''}</td></tr>`).join('')}
+          </tbody>
+        </table>
+
+        ${c.fotoEntrega ? `<div class="field"><label>Foto da entrega</label><button class="btn btn-ghost" id="verFotoDetalheBtn">📷 Ver foto</button></div>` : ''}
+      </div>
+    </div>
+  `;
+  document.getElementById('voltarPainelBtn').onclick = () => { state.screen='estoque'; state.estoqueTab='painel'; render(); };
+  document.getElementById('imprimirBtn').onclick = () => imprimirChamado(c);
+  const verFotoBtn = document.getElementById('verFotoDetalheBtn');
+  if(verFotoBtn) verFotoBtn.onclick = () => abrirFotoEntrega(c);
+}
+
+function imprimirChamado(c){
+  const area = document.getElementById('printArea');
+  area.innerHTML = `
+    <div style="font-family:Arial,sans-serif; color:#111; padding:20px;">
+      <h1 style="font-size:22px; margin:0 0 4px;">Solicitação de Estoque</h1>
+      <div style="font-size:12px; color:#555; margin-bottom:18px;">Chamado ${c.id} — Apis Flora</div>
+      <table style="width:100%; border-collapse:collapse; margin-bottom:18px; font-size:13px;">
+        <tr><td style="padding:4px 8px; border:1px solid #999; font-weight:bold; width:160px;">Setor / Centro de custo</td><td style="padding:4px 8px; border:1px solid #999;">${esc(c.setor)}</td></tr>
+        <tr><td style="padding:4px 8px; border:1px solid #999; font-weight:bold;">Solicitante</td><td style="padding:4px 8px; border:1px solid #999;">${esc(c.nome)}</td></tr>
+        <tr><td style="padding:4px 8px; border:1px solid #999; font-weight:bold;">Data do pedido</td><td style="padding:4px 8px; border:1px solid #999;">${fmtDataHora(c.criadoEm)}</td></tr>
+        <tr><td style="padding:4px 8px; border:1px solid #999; font-weight:bold;">Precisa ser entregue até</td><td style="padding:4px 8px; border:1px solid #999;">${fmtData(c.dataNecessaria)}</td></tr>
+        <tr><td style="padding:4px 8px; border:1px solid #999; font-weight:bold;">Prioridade</td><td style="padding:4px 8px; border:1px solid #999;">${esc(c.prioridade)}</td></tr>
+      </table>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr>
+            <th style="padding:6px 8px; border:1px solid #999; background:#eee;">Nº</th>
+            <th style="padding:6px 8px; border:1px solid #999; background:#eee;">Código</th>
+            <th style="padding:6px 8px; border:1px solid #999; background:#eee;">Material</th>
+            <th style="padding:6px 8px; border:1px solid #999; background:#eee;">Quantidade</th>
+            <th style="padding:6px 8px; border:1px solid #999; background:#eee;">Lote</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${c.itens.map((it,i) => `
+            <tr>
+              <td style="padding:10px 8px; border:1px solid #999; text-align:center;">${i+1}</td>
+              <td style="padding:10px 8px; border:1px solid #999;">${esc(it.codigo)}</td>
+              <td style="padding:10px 8px; border:1px solid #999;">${esc(it.material)}</td>
+              <td style="padding:10px 8px; border:1px solid #999;">${it.quantidade}${it.unidade?' '+it.unidade:''}</td>
+              <td style="padding:10px 8px; border:1px solid #999;">&nbsp;</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div style="margin-top:30px; font-size:12px; display:flex; justify-content:space-between;">
+        <div>Separado por: _____________________</div>
+        <div>Data: ____/____/______</div>
+      </div>
+    </div>
+  `;
+  window.print();
 }
 
 /* ---------------- ESTOQUE LOGIN ---------------- */
@@ -847,6 +976,7 @@ function renderEstoqueLogin(app){
 /* ---------------- ESTOQUE DASHBOARD ---------------- */
 function renderEstoque(app){
   const total = state.chamados.length;
+  const atrasados = state.chamados.filter(isAtrasado).length;
   const iconesStatus = {
     'Novo':{ic:'🆕',bg:'#DDEBFF',fg:'#1D5FBF'},
     'Em análise':{ic:'🔎',bg:'#FFF3C4',fg:'#8A6A00'},
@@ -870,6 +1000,7 @@ function renderEstoque(app){
         ${state.estoqueTab==='painel' ? `
         <div class="kpis">
           <div class="kpi"><div class="kpi-icon" style="background:var(--p-100); color:var(--p-700);">🗂️</div><div class="num">${total}</div><div class="lbl">Total de chamados</div></div>
+          ${atrasados > 0 ? `<div class="kpi" style="border-color:var(--red);"><div class="kpi-icon" style="background:#F3E2E2; color:var(--red);">⚠️</div><div class="num" style="color:var(--red);">${atrasados}</div><div class="lbl">Atrasados</div></div>` : ''}
           ${STATUS_LIST.map(s => {
             const qtd = state.chamados.filter(c=>c.status===s).length;
             const ic = iconesStatus[s] || {ic:'•',bg:'var(--p-100)',fg:'var(--p-700)'};
@@ -906,6 +1037,7 @@ function renderPainelChamados(){
           ${PRIORIDADES.map(p=>`<option ${state.filtro.prioridade===p?'selected':''}>${p}</option>`).join('')}
         </select>
       </div>
+      <p class="hint" style="margin:-4px 0 16px;">📌 Para mudar o status de um chamado para <strong>Entregue</strong>, é obrigatório anexar a foto da entrega.</p>
       <div id="tableWrap"></div>
     </div>
   `;
@@ -936,32 +1068,48 @@ function renderTable(){
   tw.innerHTML = `
     <table>
       <thead><tr>
-        <th>Chamado</th><th>Solicitante / Setor</th><th>Itens</th><th>Prioridade</th><th>Entrega</th><th>Status</th><th>Foto</th><th></th>
+        <th>Chamado</th><th>Solicitante / Setor</th><th>Itens</th><th>Prioridade</th><th>Entrega</th><th>Status</th><th>Ações</th>
       </tr></thead>
       <tbody>
-        ${list.map(c => `
-          <tr>
-            <td><span class="code-chip">${c.id}</span><div style="font-size:11.5px; color:var(--ink-soft); margin-top:5px;">${fmtDataHora(c.criadoEm)}</div></td>
+        ${list.map(c => {
+          const atrasado = isAtrasado(c);
+          return `
+          <tr style="${atrasado ? 'background:#FDEDED;' : ''}">
+            <td>
+              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <button class="mini-open-btn" data-abrir="${c.id}">🔍 Abrir</button>
+                <span class="code-chip">${c.id}</span>
+              </div>
+              <div style="font-size:11.5px; color:var(--ink-soft); margin-top:5px;">${fmtDataHora(c.criadoEm)}</div>
+            </td>
             <td><strong>${esc(c.nome)}</strong><div style="color:var(--ink-soft); font-size:12.5px;">${esc(c.setor)}</div></td>
-            <td class="items-mini">${c.itens.map(it=>`<div>${it.quantidade}${it.unidade?' '+it.unidade:''} — ${esc(it.material)} <span style="color:var(--gray);">(${it.codigo})</span></div>`).join('')}</td>
+            <td class="items-mini">${c.itens.length} ${c.itens.length===1?'item':'itens'}</td>
             <td class="${prioClass(c.prioridade)}">${c.prioridade}</td>
-            <td>${fmtData(c.dataNecessaria)}</td>
+            <td>${atrasado ? `<span style="color:var(--red); font-weight:800;">⚠️ ${fmtData(c.dataNecessaria)}</span><div style="font-size:11px; color:var(--red); font-weight:700;">Atrasado</div>` : fmtData(c.dataNecessaria)}</td>
             <td>
               <select class="status-select" data-id="${c.id}">
                 ${STATUS_LIST.map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}
               </select>
               ${c.entregueEm ? `<div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">entregue ${fmtDataHora(c.entregueEm)}</div>` : ''}
-              <br><button class="del-link" data-id="${c.id}">Excluir</button>
             </td>
-            <td>${c.fotoEntrega ? `<button class="del-link" style="color:var(--green);" data-foto="${c.id}">📷 Ver foto</button>` : '—'}</td>
+            <td>
+              ${c.fotoEntrega ? `<span class="badge" style="background:var(--p-100); color:var(--p-700);">📷 Foto anexada</span> <button class="acoes-x" data-menu="${c.id}" title="Opções">✕</button>` : `<button class="acoes-x" data-menu="${c.id}" title="Opções">✕</button>`}
+              <div class="acoes-pop" id="pop-${c.id}" style="display:none;">
+                ${c.fotoEntrega ? `<button data-foto="${c.id}">📷 Ver foto</button><button data-trocar="${c.id}">🔁 Trocar foto</button>` : ''}
+                <button data-delchamado="${c.id}">🗑 Excluir chamado</button>
+              </div>
+            </td>
           </tr>
-        `).join('')}
+        `;}).join('')}
       </tbody>
     </table>
     <input type="file" id="fotoEntregaInput" accept="image/*" style="display:none;">
+    <input type="file" id="trocarFotoInput" accept="image/*" style="display:none;">
   `;
   let pendingEntregaId = null;
+  let pendingTrocaFotoId = null;
   const fotoInput = document.getElementById('fotoEntregaInput');
+  const trocarFotoInput = document.getElementById('trocarFotoInput');
   tw.querySelectorAll('.status-select').forEach(sel=>{
     sel.onchange = async e => {
       const c = state.chamados.find(x=>x.id === e.target.dataset.id);
@@ -1000,15 +1148,57 @@ function renderTable(){
       toast('Não consegui processar a foto. Tente novamente.');
     }
   };
+  trocarFotoInput.onchange = async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if(!file || !pendingTrocaFotoId) return;
+    const c = state.chamados.find(x=>x.id === pendingTrocaFotoId);
+    pendingTrocaFotoId = null;
+    if(!c) return;
+    toast('Enviando nova foto…');
+    try{
+      c.fotoEntrega = await comprimirImagem(file);
+      await saveChamados();
+      toast(`Foto do chamado ${c.id} atualizada.`);
+      renderEstoque(document.getElementById('app'));
+    }catch(err){
+      toast('Não consegui processar a foto. Tente novamente.');
+    }
+  };
+  tw.querySelectorAll('[data-abrir]').forEach(btn=>{
+    btn.onclick = e => {
+      state.detalheChamadoId = e.target.dataset.abrir;
+      state.screen = 'estoque-detalhe';
+      render();
+    };
+  });
+  tw.querySelectorAll('[data-menu]').forEach(btn=>{
+    btn.onclick = e => {
+      const id = e.target.dataset.menu;
+      tw.querySelectorAll('.acoes-pop').forEach(p => { if(p.id !== `pop-${id}`) p.style.display = 'none'; });
+      const pop = document.getElementById(`pop-${id}`);
+      pop.style.display = pop.style.display === 'none' ? 'flex' : 'none';
+    };
+  });
   tw.querySelectorAll('[data-foto]').forEach(btn=>{
     btn.onclick = e => {
       const c = state.chamados.find(x=>x.id === e.target.dataset.foto);
       if(c && c.fotoEntrega) abrirFotoEntrega(c);
     };
   });
-  tw.querySelectorAll('.del-link[data-id]').forEach(btn=>{
+  tw.querySelectorAll('[data-trocar]').forEach(btn=>{
+    btn.onclick = e => {
+      const id = e.target.dataset.trocar;
+      const senha = prompt('Digite a senha para trocar a foto desse chamado:');
+      if(senha === null) return;
+      if(senha !== state.senhaExcluir){ toast('Senha incorreta.'); return; }
+      pendingTrocaFotoId = id;
+      trocarFotoInput.click();
+    };
+  });
+  tw.querySelectorAll('[data-delchamado]').forEach(btn=>{
     btn.onclick = async e => {
-      const id = e.target.dataset.id;
+      const id = e.target.dataset.delchamado;
       const senha = prompt(`Digite a senha para excluir o chamado ${id}:`);
       if(senha === null) return;
       if(senha !== state.senhaExcluir){ toast('Senha incorreta. Chamado não excluído.'); return; }
@@ -1194,6 +1384,7 @@ function renderDadosTab(){
       <div class="stat-card"><div class="num">${totalItens}</div><div class="lbl">Itens solicitados no total</div></div>
       <div class="stat-card"><div class="num" style="color:var(--red);">${urgentes}</div><div class="lbl">Chamados urgentes</div></div>
     </div>
+    <div style="text-align:right; margin-bottom:14px;"><button class="btn btn-ghost" id="exportarDadosBtn">⬇ Exportar tudo em Excel</button></div>
     <div class="panel" style="margin-bottom:16px;">
       <h2 class="section-title" style="font-size:16px;">Setores que mais pedem</h2>
       <p class="section-sub">Número de chamados abertos por setor / centro de custo.</p>
@@ -1217,6 +1408,37 @@ function renderDadosTab(){
       `).join('')}
     </div>
   `;
+  const exportarDadosBtn = document.getElementById('exportarDadosBtn');
+  if(exportarDadosBtn){
+    exportarDadosBtn.onclick = () => {
+      const linhasChamados = state.chamados.map(c => ({
+        'Chamado': c.id,
+        'Solicitante': c.nome,
+        'Setor': c.setor,
+        'Itens': c.itens.map(it=>`${it.quantidade}${it.unidade?' '+it.unidade:''} - ${it.material} (${it.codigo})`).join('; '),
+        'Prioridade': c.prioridade,
+        'Data pedida': fmtData(c.dataNecessaria),
+        'Status': c.status,
+        'Atrasado': isAtrasado(c) ? 'Sim' : 'Não',
+        'Criado em': fmtDataHora(c.criadoEm),
+        'Entregue em': c.entregueEm ? fmtDataHora(c.entregueEm) : ''
+      }));
+      const avaliados = state.chamados.filter(c => c.status === 'Entregue' && c.entregueEm);
+      const linhasAvaliacao = avaliados.map(c => {
+        const atrasado = new Date(c.entregueEm) > new Date(c.dataNecessaria + 'T23:59:59');
+        return {
+          'Chamado': c.id, 'Setor': c.setor, 'Pedido para': fmtData(c.dataNecessaria),
+          'Entregue em': fmtDataHora(c.entregueEm), 'Resultado': atrasado ? 'Fora do prazo' : 'No prazo'
+        };
+      });
+      exportarExcel([
+        { nome:'Chamados', linhas: linhasChamados },
+        { nome:'Setores', linhas: rankSetores.map(([setor,qtd]) => ({ 'Setor': setor, 'Chamados': qtd })) },
+        { nome:'Itens mais pedidos', linhas: rankItens.map(([item,qtd]) => ({ 'Item': item, 'Quantidade total': qtd })) },
+        { nome:'Avaliação', linhas: linhasAvaliacao }
+      ], `apis_flora_relatorio_${new Date().toISOString().slice(0,10)}.xlsx`);
+    };
+  }
 }
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
